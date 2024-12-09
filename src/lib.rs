@@ -224,6 +224,8 @@ mod tests {
 
     use hyper::StatusCode;
     use tokio::sync::mpsc;
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
 
     /// This always passes.
     #[tokio::test]
@@ -247,10 +249,14 @@ mod tests {
     /// - Assert that we receive a 200 OK response for each request.
     ///   This means that the graceful shutdown process was successful.
     async fn test_graceful_shutdown(tls_config: TlsConfig) {
+        init_tracing();
+
         // We repeat the test multiple times since the error does not always occur.
         const TEST_REPETITION_COUNT: usize = 100;
 
         for _ in 0..TEST_REPETITION_COUNT {
+            tracing::info!("STARTING NEW ITERATION");
+
             let tcp_listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0)))
                 .await
                 .unwrap();
@@ -296,6 +302,7 @@ mod tests {
             // This means that if all requests get a 200 OK response then the graceful shutdown
             // process was successful.
             let _wait_for_first_response = response_received_rx.recv().await.unwrap();
+
             shutdown_sender.send(()).unwrap();
 
             // Check that every request received a 200 response.
@@ -351,5 +358,28 @@ Error during the request/response cycle:
         tokio::time::timeout(std::time::Duration::from_secs(3), fut)
             .await
             .unwrap();
+    }
+
+    fn init_tracing() {
+        let tracing_subscriber_layer = tracing_subscriber::fmt::layer()
+            // .pretty()
+            .with_ansi(false)
+            .with_target(true)
+            .with_file(true)
+            .with_line_number(true)
+            .with_level(true)
+            .with_timer(tracing_subscriber::fmt::time::UtcTime::rfc_3339());
+
+        tracing_subscriber::registry()
+            .with(
+                tracing_subscriber::EnvFilter::try_from_default_env()
+                    .unwrap_or_else(|_| default_tracing_filters().into()),
+            )
+            .with(tracing_subscriber_layer)
+            .init();
+    }
+
+    fn default_tracing_filters() -> &'static str {
+        "hyper_graceful_shutdown_issue=trace,hyper=trace,hyper_util=trace"
     }
 }
